@@ -1,0 +1,48 @@
+podTemplate(
+  containers: [
+    containerTemplate(
+      name: 'docker', image: 'docker:19.03', ttyEnabled: true, command: 'cat',
+      alwaysPullImage: false
+    )
+  ],
+  volumes: [
+    hostPathVolume(mountPath: '/var/run/docker.sock', hostPath: '/var/run/docker.sock')
+  ],
+  idleMinutes: 5) {
+
+  node(POD_LABEL) {
+    stage('Checkout') {
+      container('jnlp') {
+        final scmVars = checkout scm
+        echo "scmVars: ${scmVars}"
+        env.GIT_COMMIT = scmVars.GIT_COMMIT
+        env.GIT_BRANCH = scmVars.GIT_BRANCH 
+
+        withCredentials([string(credentialsId: 'github-keyscan', variable: 'github_keyscan')]) {
+          sh """
+            [ -d /root/.ssh ] || mkdir -p /root/.ssh
+            echo '${github_keyscan}' >> /root/.ssh/known_hosts
+          """
+        }
+        sshagent(['s5-jenkins-bot']) {
+          sh "git submodule update --init --recursive -j8"
+        }
+      }
+    }
+    stage('Build') {
+      container('docker') {
+        sh 'docker build . -t gcr.io/s5s-big-hot-k8s/s5s-clickhouse:${GIT_COMMIT}'
+      }
+    }
+    stage('Push') {
+      container('docker') {
+        // withCredentials([string(credentialsId: 'jenkins-gcp-sa-key', variable: 'JENKINS_GCP_SA_KEY')]) {
+        //   sh 'echo ${JENKINS_GCP_SA_KEY} | base64 -d | docker login -u _json_key --password-stdin https://gcr.io'
+        // }
+        // sh 'docker tag gcr.io/s5s-big-hot-k8s/s5s-clickhouse:${GIT_COMMIT} gcr.io/s5s-big-hot-k8s/s5s-clickhouse:latest'
+        // sh 'docker push gcr.io/s5s-big-hot-k8s/s5s-clickhouse:${GIT_COMMIT}'
+        // sh 'docker push gcr.io/s5s-big-hot-k8s/s5s-clickhouse:latest'
+      }
+    }
+  }
+}
