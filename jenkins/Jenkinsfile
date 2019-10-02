@@ -1,16 +1,25 @@
 podTemplate(
+  label: 'clickhouse-builder',
   containers: [
     containerTemplate(
       name: 'docker', image: 'docker:19.03', ttyEnabled: true, command: 'cat',
-      alwaysPullImage: false
+      alwaysPullImage: false,
+    ),
+    containerTemplate(
+      name: 'dind', image: 'gcr.io/s5s-big-hot-k8s/s5s-clickhouse-builder:latest', ttyEnabled: true,
+      alwaysPullImage: true,
+
+      privileged: true,
+      resourceRequestCpu: "4",
+      resourceRequestMemory: "16Gi"
     )
   ],
   volumes: [
-    hostPathVolume(mountPath: '/var/run/docker.sock', hostPath: '/var/run/docker.sock')
+    persistentVolumeClaim(mountPath: '/root/.ccache', claimName: 'jenkins-ccache')
   ],
   idleMinutes: 5) {
 
-  node(POD_LABEL) {
+  node('clickhouse-builder') {
     stage('Checkout') {
       container('jnlp') {
         final scmVars = checkout scm
@@ -20,22 +29,30 @@ podTemplate(
 
         withCredentials([string(credentialsId: 'github-keyscan', variable: 'github_keyscan')]) {
           sh """
-            [ -d /root/.ssh ] || mkdir -p /root/.ssh
-            echo '${github_keyscan}' >> /root/.ssh/known_hosts
+            [ -d ${env.HOME}/.ssh ] || mkdir -p ${env.HOME}/.ssh
+            echo '${github_keyscan}' >> ${env.HOME}/.ssh/known_hosts
           """
         }
         sshagent(['s5-jenkins-bot']) {
-          sh "git submodule update --init --recursive -j8"
+          sh "git submodule update --init --recursive"
         }
       }
     }
-    stage('Build') {
-      container('docker') {
-        sh 'docker build . -t gcr.io/s5s-big-hot-k8s/s5s-clickhouse:${GIT_COMMIT}'
+    stage('Build CH Source') {
+      container('dind') {
+        sh """
+          cd ./docker/packager
+          mkdir -p ../s5-server/deb
+          ./packager --package-type deb --output-dir ../s5-server/deb --compiler clang-8 --cache ccache --ccache_dir /root/.ccache
+        """
       }
     }
-    stage('Push') {
-      container('docker') {
+    stage('Build CH Image') {
+      container('dind') {
+        sh """
+          cd ./docker/s5-server
+          docker build . -t s5s-clickhouse:${GIT_COMMIT}
+        """
         // withCredentials([string(credentialsId: 'jenkins-gcp-sa-key', variable: 'JENKINS_GCP_SA_KEY')]) {
         //   sh 'echo ${JENKINS_GCP_SA_KEY} | base64 -d | docker login -u _json_key --password-stdin https://gcr.io'
         // }
