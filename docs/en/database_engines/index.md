@@ -8,4 +8,6 @@ You can also use the following database engines:
 
 - [MySQL](mysql.md)
 
-[Original article](https://clickhouse.yandex/docs/en/database_engines/) <!--hide-->
+- [Lazy](lazy.md)
+
+[Original article](https://clickhouse.tech/docs/en/database_engines/) <!--hide-->

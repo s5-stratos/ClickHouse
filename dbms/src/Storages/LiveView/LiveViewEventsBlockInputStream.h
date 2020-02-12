@@ -9,7 +9,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
-
 #pragma once
 
 #include <Poco/Condition.h>
@@ -213,12 +212,8 @@ protected:
 
         // move right to the end
         it = end;
-
-        if (it == end)
-        {
-            end_of_blocks = false;
-            num_updates += 1;
-        }
+        end_of_blocks = false;
+        num_updates += 1;
 
         last_event_timestamp_usec = static_cast<UInt64>(timestamp.epochMicroseconds());
 

@@ -37,6 +37,8 @@
     M(CreatedReadBufferOrdinary, "") \
     M(CreatedReadBufferAIO, "") \
     M(CreatedReadBufferAIOFailed, "") \
+    M(CreatedReadBufferMMap, "") \
+    M(CreatedReadBufferMMapFailed, "") \
     M(CreatedWriteBufferOrdinary, "") \
     M(CreatedWriteBufferAIO, "") \
     M(CreatedWriteBufferAIOFailed, "") \
@@ -114,6 +116,7 @@
     M(SelectedRanges, "Number of (non-adjacent) ranges in all data parts selected to read from a MergeTree table.") \
     M(SelectedMarks, "Number of marks (index granules) selected to read from a MergeTree table.") \
     \
+    M(Merge, "Number of launched background merges.") \
     M(MergedRows, "Rows read for background merges. This is the number of rows before merge.") \
     M(MergedUncompressedBytes, "Uncompressed bytes (for columns as they stored in memory) that was read for background merges. This is the number before merge.") \
     M(MergesTimeMilliseconds, "Total time spent for background merges.")\

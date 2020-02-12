@@ -18,10 +18,12 @@
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnTuple.h>
 
-#include <Interpreters/Context.h>
-#include <Interpreters/ExternalDictionaries.h>
+#include <Access/AccessFlags.h>
 
-#include <Functions/IFunction.h>
+#include <Interpreters/Context.h>
+#include <Interpreters/ExternalDictionariesLoader.h>
+
+#include <Functions/IFunctionImpl.h>
 #include <Functions/FunctionHelpers.h>
 
 #include <Dictionaries/FlatDictionary.h>
@@ -48,10 +50,9 @@ namespace ErrorCodes
     extern const int TYPE_MISMATCH;
     extern const int ILLEGAL_COLUMN;
     extern const int BAD_ARGUMENTS;
-    extern const int DICTIONARY_ACCESS_DENIED;
 }
 
-/** Functions that use plug-ins (external) dictionaries.
+/** Functions that use plug-ins (external) dictionaries_loader.
   *
   * Get the value of the attribute of the specified type.
   *     dictGetType(dictionary, attribute, id),
@@ -73,11 +74,11 @@ public:
 
     static FunctionPtr create(const Context & context)
     {
-        return std::make_shared<FunctionDictHas>(context.getExternalDictionaries(), context);
+        return std::make_shared<FunctionDictHas>(context.getExternalDictionariesLoader(), context);
     }
 
-    FunctionDictHas(const ExternalDictionaries & dictionaries_, const Context & context_)
-        : dictionaries(dictionaries_)
+    FunctionDictHas(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_)
+        : dictionaries_loader(dictionaries_loader_)
         , context(context_) {}
 
     String getName() const override { return name; }
@@ -124,14 +125,9 @@ private:
             return;
         }
 
-        auto dict = dictionaries.getDictionary(dict_name_col->getValue<String>());
+        auto dict = dictionaries_loader.getDictionary(dict_name_col->getValue<String>());
         const auto dict_ptr = dict.get();
-
-        if (!context.hasDictionaryAccessRights(dict_ptr->getName()))
-        {
-            throw Exception{"For function " + getName() + ", cannot access dictionary "
-                + dict->getName() + " on database " + context.getCurrentDatabase(), ErrorCodes::DICTIONARY_ACCESS_DENIED};
-        }
+        context.checkAccess(AccessType::dictHas, dict_ptr->getDatabaseOrNoDatabaseTag(), dict_ptr->getName());
 
         if (!executeDispatchSimple<FlatDictionary>(block, arguments, result, dict_ptr) &&
             !executeDispatchSimple<HashedDictionary>(block, arguments, result, dict_ptr) &&
@@ -191,12 +187,12 @@ private:
         return true;
     }
 
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
 };
 
 
-static bool isDictGetFunctionInjective(const ExternalDictionaries & dictionaries, const Block & sample_block)
+static bool isDictGetFunctionInjective(const ExternalDictionariesLoader & dictionaries_loader, const Block & sample_block)
 {
     if (sample_block.columns() != 3 && sample_block.columns() != 4)
         throw Exception{"Function dictGet... takes 3 or 4 arguments", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH};
@@ -209,7 +205,7 @@ static bool isDictGetFunctionInjective(const ExternalDictionaries & dictionaries
     if (!attr_name_col)
         throw Exception{"Second argument of function dictGet... must be a constant string", ErrorCodes::ILLEGAL_COLUMN};
 
-    return dictionaries.getDictionary(dict_name_col->getValue<String>())->isInjective(attr_name_col->getValue<String>());
+    return dictionaries_loader.getDictionary(dict_name_col->getValue<String>())->isInjective(attr_name_col->getValue<String>());
 }
 
 
@@ -227,11 +223,11 @@ public:
 
     static FunctionPtr create(const Context & context)
     {
-        return std::make_shared<FunctionDictGetString>(context.getExternalDictionaries(), context);
+        return std::make_shared<FunctionDictGetString>(context.getExternalDictionariesLoader(), context);
     }
 
-    FunctionDictGetString(const ExternalDictionaries & dictionaries_, const Context & context_)
-        : dictionaries(dictionaries_)
+    FunctionDictGetString(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_)
+        : dictionaries_loader(dictionaries_loader_)
         , context(context_) {}
 
     String getName() const override { return name; }
@@ -245,7 +241,7 @@ private:
 
     bool isInjective(const Block & sample_block) override
     {
-        return isDictGetFunctionInjective(dictionaries, sample_block);
+        return isDictGetFunctionInjective(dictionaries_loader, sample_block);
     }
 
     DataTypePtr getReturnTypeImpl(const DataTypes & arguments) const override
@@ -273,7 +269,7 @@ private:
                 + ", must be UInt64 or tuple(...).", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT};
         }
 
-        /// This is for the case of range dictionaries.
+        /// This is for the case of range dictionaries_loader.
         if (arguments.size() == 4 && !arguments[3]->isValueRepresentedByInteger())
         {
             throw Exception{"Illegal type " + arguments[3]->getName() +
@@ -299,14 +295,9 @@ private:
             return;
         }
 
-        auto dict = dictionaries.getDictionary(dict_name_col->getValue<String>());
+        auto dict = dictionaries_loader.getDictionary(dict_name_col->getValue<String>());
         const auto dict_ptr = dict.get();
-
-        if (!context.hasDictionaryAccessRights(dict_ptr->getName()))
-        {
-            throw Exception{"For function " + getName() + ", cannot access dictionary "
-                + dict->getName() + " on database " + context.getCurrentDatabase(), ErrorCodes::DICTIONARY_ACCESS_DENIED};
-        }
+        context.checkAccess(AccessType::dictGet, dict_ptr->getDatabaseOrNoDatabaseTag(), dict_ptr->getName());
 
         if (!executeDispatch<FlatDictionary>(block, arguments, result, dict_ptr) &&
             !executeDispatch<HashedDictionary>(block, arguments, result, dict_ptr) &&
@@ -368,7 +359,7 @@ private:
         String attr_name = attr_name_col->getValue<String>();
 
         const ColumnWithTypeAndName & key_col_with_type = block.getByPosition(arguments[2]);
-        /// Functions in external dictionaries only support full-value (not constant) columns with keys.
+        /// Functions in external dictionaries_loader only support full-value (not constant) columns with keys.
         ColumnPtr key_col = key_col_with_type.column->convertToFullColumnIfConst();
 
         if (checkColumn<ColumnTuple>(key_col.get()))
@@ -419,7 +410,7 @@ private:
         return true;
     }
 
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
 };
 
@@ -431,11 +422,11 @@ public:
 
     static FunctionPtr create(const Context & context)
     {
-        return std::make_shared<FunctionDictGetStringOrDefault>(context.getExternalDictionaries(), context);
+        return std::make_shared<FunctionDictGetStringOrDefault>(context.getExternalDictionariesLoader(), context);
     }
 
-    FunctionDictGetStringOrDefault(const ExternalDictionaries & dictionaries_, const Context & context_)
-        : dictionaries(dictionaries_)
+    FunctionDictGetStringOrDefault(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_)
+        : dictionaries_loader(dictionaries_loader_)
         , context(context_) {}
 
     String getName() const override { return name; }
@@ -485,14 +476,9 @@ private:
             return;
         }
 
-        auto dict = dictionaries.getDictionary(dict_name_col->getValue<String>());
+        auto dict = dictionaries_loader.getDictionary(dict_name_col->getValue<String>());
         const auto dict_ptr = dict.get();
-
-        if (!context.hasDictionaryAccessRights(dict_ptr->getName()))
-        {
-            throw Exception{"For function " + getName() + ", cannot access dictionary "
-                + dict->getName() + " on database " + context.getCurrentDatabase(), ErrorCodes::DICTIONARY_ACCESS_DENIED};
-        }
+        context.checkAccess(AccessType::dictGet, dict_ptr->getDatabaseOrNoDatabaseTag(), dict_ptr->getName());
 
         if (!executeDispatch<FlatDictionary>(block, arguments, result, dict_ptr) &&
             !executeDispatch<HashedDictionary>(block, arguments, result, dict_ptr) &&
@@ -606,7 +592,7 @@ private:
         String attr_name = attr_name_col->getValue<String>();
 
         const ColumnWithTypeAndName & key_col_with_type = block.getByPosition(arguments[2]);
-        /// Functions in external dictionaries only support full-value (not constant) columns with keys.
+        /// Functions in external dictionaries_loader only support full-value (not constant) columns with keys.
         ColumnPtr key_col = key_col_with_type.column->convertToFullColumnIfConst();
 
         const auto & key_columns = typeid_cast<const ColumnTuple &>(*key_col).getColumnsCopy();
@@ -631,7 +617,7 @@ private:
         return true;
     }
 
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
 };
 
@@ -755,11 +741,11 @@ public:
 
     static FunctionPtr create(const Context & context, UInt32 dec_scale = 0)
     {
-        return std::make_shared<FunctionDictGet>(context.getExternalDictionaries(), context, dec_scale);
+        return std::make_shared<FunctionDictGet>(context.getExternalDictionariesLoader(), context, dec_scale);
     }
 
-    FunctionDictGet(const ExternalDictionaries & dictionaries_, const Context & context_, UInt32 dec_scale = 0)
-        : dictionaries(dictionaries_)
+    FunctionDictGet(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_, UInt32 dec_scale = 0)
+        : dictionaries_loader(dictionaries_loader_)
         , context(context_)
         , decimal_scale(dec_scale)
     {}
@@ -775,7 +761,7 @@ private:
 
     bool isInjective(const Block & sample_block) override
     {
-        return isDictGetFunctionInjective(dictionaries, sample_block);
+        return isDictGetFunctionInjective(dictionaries_loader, sample_block);
     }
 
     DataTypePtr getReturnTypeImpl(const DataTypes & arguments) const override
@@ -827,14 +813,9 @@ private:
             return;
         }
 
-        auto dict = dictionaries.getDictionary(dict_name_col->getValue<String>());
+        auto dict = dictionaries_loader.getDictionary(dict_name_col->getValue<String>());
         const auto dict_ptr = dict.get();
-
-        if (!context.hasDictionaryAccessRights(dict_ptr->getName()))
-        {
-            throw Exception{"For function " + getName() + ", cannot access dictionary "
-                + dict->getName() + " on database " + context.getCurrentDatabase(), ErrorCodes::DICTIONARY_ACCESS_DENIED};
-        }
+        context.checkAccess(AccessType::dictGet, dict_ptr->getDatabaseOrNoDatabaseTag(), dict_ptr->getName());
 
         if (!executeDispatch<FlatDictionary>(block, arguments, result, dict_ptr) &&
             !executeDispatch<HashedDictionary>(block, arguments, result, dict_ptr) &&
@@ -922,7 +903,7 @@ private:
 
         const ColumnWithTypeAndName & key_col_with_type = block.getByPosition(arguments[2]);
 
-        /// Functions in external dictionaries only support full-value (not constant) columns with keys.
+        /// Functions in external dictionaries_loader only support full-value (not constant) columns with keys.
         ColumnPtr key_col = key_col_with_type.column->convertToFullColumnIfConst();
 
         if (checkColumn<ColumnTuple>(key_col.get()))
@@ -983,7 +964,7 @@ private:
         return true;
     }
 
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
     UInt32 decimal_scale;
 };
@@ -1034,11 +1015,11 @@ public:
 
     static FunctionPtr create(const Context & context, UInt32 dec_scale = 0)
     {
-        return std::make_shared<FunctionDictGetOrDefault>(context.getExternalDictionaries(), context, dec_scale);
+        return std::make_shared<FunctionDictGetOrDefault>(context.getExternalDictionariesLoader(), context, dec_scale);
     }
 
-    FunctionDictGetOrDefault(const ExternalDictionaries & dictionaries_, const Context & context_, UInt32 dec_scale = 0)
-        : dictionaries(dictionaries_)
+    FunctionDictGetOrDefault(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_, UInt32 dec_scale = 0)
+        : dictionaries_loader(dictionaries_loader_)
         , context(context_)
         , decimal_scale(dec_scale)
     {}
@@ -1091,14 +1072,9 @@ private:
             return;
         }
 
-        auto dict = dictionaries.getDictionary(dict_name_col->getValue<String>());
+        auto dict = dictionaries_loader.getDictionary(dict_name_col->getValue<String>());
         const auto dict_ptr = dict.get();
-
-        if (!context.hasDictionaryAccessRights(dict_ptr->getName()))
-        {
-            throw Exception{"For function " + getName() + ", cannot access dictionary "
-                + dict->getName() + " on database " + context.getCurrentDatabase(), ErrorCodes::DICTIONARY_ACCESS_DENIED};
-        }
+        context.checkAccess(AccessType::dictGet, dict_ptr->getDatabaseOrNoDatabaseTag(), dict_ptr->getName());
 
         if (!executeDispatch<FlatDictionary>(block, arguments, result, dict_ptr) &&
             !executeDispatch<HashedDictionary>(block, arguments, result, dict_ptr) &&
@@ -1248,7 +1224,7 @@ private:
 
         const ColumnWithTypeAndName & key_col_with_type = block.getByPosition(arguments[2]);
 
-        /// Functions in external dictionaries only support full-value (not constant) columns with keys.
+        /// Functions in external dictionaries_loader only support full-value (not constant) columns with keys.
         ColumnPtr key_col = key_col_with_type.column->convertToFullColumnIfConst();
 
         const auto & key_columns = typeid_cast<const ColumnTuple &>(*key_col).getColumnsCopy();
@@ -1284,7 +1260,7 @@ private:
         return true;
     }
 
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
     UInt32 decimal_scale;
 };
@@ -1332,10 +1308,10 @@ public:
 
     static FunctionPtr create(const Context & context)
     {
-        return std::make_shared<FunctionDictGetNoType>(context.getExternalDictionaries(), context);
+        return std::make_shared<FunctionDictGetNoType>(context.getExternalDictionariesLoader(), context);
     }
 
-    FunctionDictGetNoType(const ExternalDictionaries & dictionaries_, const Context & context_) : dictionaries(dictionaries_), context(context_) {}
+    FunctionDictGetNoType(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_) : dictionaries_loader(dictionaries_loader_), context(context_) {}
 
     String getName() const override { return name; }
 
@@ -1348,7 +1324,7 @@ private:
 
     bool isInjective(const Block & sample_block) override
     {
-        return isDictGetFunctionInjective(dictionaries, sample_block);
+        return isDictGetFunctionInjective(dictionaries_loader, sample_block);
     }
 
     DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
@@ -1388,7 +1364,7 @@ private:
                     + ", must be convertible to " + TypeName<Int64>::get() + ".", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT};
         }
 
-        auto dict = dictionaries.getDictionary(dict_name);
+        auto dict = dictionaries_loader.getDictionary(dict_name);
         const DictionaryStructure & structure = dict->getStructure();
 
         for (const auto idx : ext::range(0, structure.attributes.size()))
@@ -1468,7 +1444,7 @@ private:
     }
 
 private:
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
     mutable FunctionPtr impl; // underlying function used by dictGet function without explicit type info
 };
@@ -1481,10 +1457,10 @@ public:
 
     static FunctionPtr create(const Context & context)
     {
-        return std::make_shared<FunctionDictGetNoTypeOrDefault>(context.getExternalDictionaries(), context);
+        return std::make_shared<FunctionDictGetNoTypeOrDefault>(context.getExternalDictionariesLoader(), context);
     }
 
-    FunctionDictGetNoTypeOrDefault(const ExternalDictionaries & dictionaries_, const Context & context_) : dictionaries(dictionaries_), context(context_) {}
+    FunctionDictGetNoTypeOrDefault(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_) : dictionaries_loader(dictionaries_loader_), context(context_) {}
 
     String getName() const override { return name; }
 
@@ -1496,7 +1472,7 @@ private:
 
     bool isInjective(const Block & sample_block) override
     {
-        return isDictGetFunctionInjective(dictionaries, sample_block);
+        return isDictGetFunctionInjective(dictionaries_loader, sample_block);
     }
 
     DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
@@ -1524,7 +1500,7 @@ private:
             throw Exception{"Illegal type " + arguments[2].type->getName() + " of third argument of function " + getName()
                 + ", must be UInt64 or tuple(...).", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT};
 
-        auto dict = dictionaries.getDictionary(dict_name);
+        auto dict = dictionaries_loader.getDictionary(dict_name);
         const DictionaryStructure & structure = dict->getStructure();
 
         for (const auto idx : ext::range(0, structure.attributes.size()))
@@ -1610,7 +1586,7 @@ private:
     }
 
 private:
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
     mutable FunctionPtr impl; // underlying function used by dictGet function without explicit type info
 };
@@ -1624,11 +1600,11 @@ public:
 
     static FunctionPtr create(const Context & context)
     {
-        return std::make_shared<FunctionDictGetHierarchy>(context.getExternalDictionaries(), context);
+        return std::make_shared<FunctionDictGetHierarchy>(context.getExternalDictionariesLoader(), context);
     }
 
-    FunctionDictGetHierarchy(const ExternalDictionaries & dictionaries_, const Context & context_)
-        : dictionaries(dictionaries_)
+    FunctionDictGetHierarchy(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_)
+        : dictionaries_loader(dictionaries_loader_)
         , context(context_) {}
 
     String getName() const override { return name; }
@@ -1668,14 +1644,9 @@ private:
             return;
         }
 
-        auto dict = dictionaries.getDictionary(dict_name_col->getValue<String>());
+        auto dict = dictionaries_loader.getDictionary(dict_name_col->getValue<String>());
         const auto dict_ptr = dict.get();
-
-        if (!context.hasDictionaryAccessRights(dict_ptr->getName()))
-        {
-            throw Exception{"For function " + getName() + ", cannot access dictionary "
-                + dict->getName() + " on database " + context.getCurrentDatabase(), ErrorCodes::DICTIONARY_ACCESS_DENIED};
-        }
+        context.checkAccess(AccessType::dictGetHierarchy, dict_ptr->getDatabaseOrNoDatabaseTag(), dict_ptr->getName());
 
         if (!executeDispatch<FlatDictionary>(block, arguments, result, dict_ptr) &&
             !executeDispatch<HashedDictionary>(block, arguments, result, dict_ptr) &&
@@ -1778,7 +1749,7 @@ private:
         return true;
     }
 
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
 };
 
@@ -1790,11 +1761,11 @@ public:
 
     static FunctionPtr create(const Context & context)
     {
-        return std::make_shared<FunctionDictIsIn>(context.getExternalDictionaries(), context);
+        return std::make_shared<FunctionDictIsIn>(context.getExternalDictionariesLoader(), context);
     }
 
-    FunctionDictIsIn(const ExternalDictionaries & dictionaries_, const Context & context_)
-        : dictionaries(dictionaries_)
+    FunctionDictIsIn(const ExternalDictionariesLoader & dictionaries_loader_, const Context & context_)
+        : dictionaries_loader(dictionaries_loader_)
         , context(context_) {}
 
     String getName() const override { return name; }
@@ -1837,14 +1808,9 @@ private:
             return;
         }
 
-        auto dict = dictionaries.getDictionary(dict_name_col->getValue<String>());
+        auto dict = dictionaries_loader.getDictionary(dict_name_col->getValue<String>());
         const auto dict_ptr = dict.get();
-
-        if (!context.hasDictionaryAccessRights(dict_ptr->getName()))
-        {
-            throw Exception{"For function " + getName() + ", cannot access dictionary "
-                + dict->getName() + " on database " + context.getCurrentDatabase(), ErrorCodes::DICTIONARY_ACCESS_DENIED};
-        }
+        context.checkAccess(AccessType::dictIsIn, dict_ptr->getDatabaseOrNoDatabaseTag(), dict_ptr->getName());
 
         if (!executeDispatch<FlatDictionary>(block, arguments, result, dict_ptr)
             && !executeDispatch<HashedDictionary>(block, arguments, result, dict_ptr)
@@ -1949,7 +1915,7 @@ private:
         return true;
     }
 
-    const ExternalDictionaries & dictionaries;
+    const ExternalDictionariesLoader & dictionaries_loader;
     const Context & context;
 };
 

@@ -2,7 +2,6 @@
 
 #include <common/logger_useful.h>
 
-#include <Core/Row.h>
 #include <Core/ColumnNumbers.h>
 #include <DataStreams/MergingSortedBlockInputStream.h>
 #include <AggregateFunctions/IAggregateFunction.h>
@@ -226,7 +225,7 @@ private:
     UInt32 selectPrecision(const Graphite::Retentions & retentions, time_t time) const;
 
 
-    void merge(MutableColumns & merged_columns, std::priority_queue<SortCursor> & queue);
+    void merge(MutableColumns & merged_columns, SortingHeap<SortCursor> & queue);
 
     /// Insert the values into the resulting columns, which will not be changed in the future.
     template <typename TSortCursor>

@@ -19,8 +19,8 @@ namespace DB
 class ParserNestedTable : public IParserBase
 {
 protected:
-    const char * getName() const { return "nested table"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const override { return "nested table"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
 
@@ -33,28 +33,16 @@ protected:
 class ParserIdentifierWithParameters : public IParserBase
 {
 protected:
-    const char * getName() const { return "identifier with parameters"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const override { return "identifier with parameters"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
-
-
-/** Data type or table engine, possibly with parameters. For example, UInt8 or see examples from ParserIdentifierWithParameters
-  * Parse result is ASTFunction, with or without arguments.
-  */
-class ParserIdentifierWithOptionalParameters : public IParserBase
-{
-protected:
-    const char * getName() const { return "identifier with optional parameters"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
-};
-
 
 template <typename NameParser>
 class IParserNameTypePair : public IParserBase
 {
 protected:
-    const char * getName() const { return "name and type pair"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const  override{ return "name and type pair"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
 /** The name and type are separated by a space. For example, URL String. */
@@ -87,16 +75,16 @@ bool IParserNameTypePair<NameParser>::parseImpl(Pos & pos, ASTPtr & node, Expect
 class ParserNameTypePairList : public IParserBase
 {
 protected:
-    const char * getName() const { return "name and type pair list"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const override { return "name and type pair list"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
 /** List of table names. */
 class ParserNameList : public IParserBase
 {
 protected:
-    const char * getName() const { return "name list"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const override { return "name list"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
 
@@ -111,9 +99,9 @@ public:
 protected:
     using ASTDeclarePtr = std::shared_ptr<ASTColumnDeclaration>;
 
-    const char * getName() const { return "column declaration"; }
+    const char * getName() const  override{ return "column declaration"; }
 
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 
     bool require_type = true;
 };
@@ -152,11 +140,11 @@ bool IParserColumnDeclaration<NameParser>::parseImpl(Pos & pos, ASTPtr & node, E
     ASTPtr codec_expression;
     ASTPtr ttl_expression;
 
-    if (!s_default.check_without_moving(pos, expected) &&
-        !s_materialized.check_without_moving(pos, expected) &&
-        !s_alias.check_without_moving(pos, expected) &&
-        !s_comment.check_without_moving(pos, expected) &&
-        !s_codec.check_without_moving(pos, expected))
+    if (!s_default.checkWithoutMoving(pos, expected) &&
+        !s_materialized.checkWithoutMoving(pos, expected) &&
+        !s_alias.checkWithoutMoving(pos, expected) &&
+        !s_comment.checkWithoutMoving(pos, expected) &&
+        !s_codec.checkWithoutMoving(pos, expected))
     {
         if (!type_parser.parse(pos, type, expected))
             return false;
@@ -236,8 +224,8 @@ bool IParserColumnDeclaration<NameParser>::parseImpl(Pos & pos, ASTPtr & node, E
 class ParserColumnDeclarationList : public IParserBase
 {
 protected:
-    const char * getName() const { return "column declaration list"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const override { return "column declaration list"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
 
@@ -262,7 +250,7 @@ protected:
 class ParserTablePropertyDeclaration : public IParserBase
 {
 protected:
-    const char * getName() const override { return "table propery (column, index, constraint) declaration"; }
+    const char * getName() const override { return "table property (column, index, constraint) declaration"; }
     bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
@@ -296,8 +284,66 @@ protected:
 class ParserStorage : public IParserBase
 {
 protected:
-    const char * getName() const { return "storage definition"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const override { return "storage definition"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
+/** Query like this:
+  * CREATE|ATTACH TABLE [IF NOT EXISTS] [db.]name
+  * (
+  *     name1 type1,
+  *     name2 type2,
+  *     ...
+  *     INDEX name1 expr TYPE type1(args) GRANULARITY value,
+  *     ...
+  * ) ENGINE = engine
+  *
+  * Or:
+  * CREATE|ATTACH TABLE [IF NOT EXISTS] [db.]name AS [db2.]name2 [ENGINE = engine]
+  *
+  * Or:
+  * CREATE|ATTACH TABLE [IF NOT EXISTS] [db.]name AS ENGINE = engine SELECT ...
+  *
+  */
+class ParserCreateTableQuery : public IParserBase
+{
+protected:
+    const char * getName() const override { return "CREATE TABLE or ATTACH TABLE query"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
+/// CREATE|ATTACH LIVE VIEW [IF NOT EXISTS] [db.]name [TO [db.]name] AS SELECT ...
+class ParserCreateLiveViewQuery : public IParserBase
+{
+protected:
+    const char * getName() const override { return "CREATE LIVE VIEW query"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
+/// CREATE|ATTACH DATABASE db [ENGINE = engine]
+class ParserCreateDatabaseQuery : public IParserBase
+{
+protected:
+    const char * getName() const override { return "CREATE DATABASE query"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
+/// CREATE[OR REPLACE]|ATTACH [[MATERIALIZED] VIEW] | [VIEW]] [IF NOT EXISTS] [db.]name [TO [db.]name] [ENGINE = engine] [POPULATE] AS SELECT ...
+class ParserCreateViewQuery : public IParserBase
+{
+protected:
+    const char * getName() const override { return "CREATE VIEW query"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+};
+
+/// Parses complete dictionary create query. Uses ParserDictionary and
+/// ParserDictionaryAttributeDeclaration. Produces ASTCreateQuery.
+/// CREATE DICTIONAY [IF NOT EXISTS] [db.]name (attrs) PRIMARY KEY key SOURCE(s(params)) LAYOUT(l(params)) LIFETIME([min v1 max] v2) [RANGE(min v1 max v2)]
+class ParserCreateDictionaryQuery : public IParserBase
+{
+protected:
+    const char * getName() const override { return "CREATE DICTIONARY"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
 
@@ -326,8 +372,8 @@ protected:
 class ParserCreateQuery : public IParserBase
 {
 protected:
-    const char * getName() const { return "CREATE TABLE or ATTACH TABLE query"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected);
+    const char * getName() const override { return "CREATE TABLE or ATTACH TABLE query"; }
+    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
 };
 
 }

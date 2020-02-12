@@ -1,10 +1,8 @@
 #pragma once
 
-#include <queue>
-#include <Poco/TemporaryFile.h>
-
 #include <common/logger_useful.h>
 
+#include <Common/filesystemHelpers.h>
 #include <Core/SortDescription.h>
 #include <Core/SortCursor.h>
 
@@ -17,6 +15,11 @@
 
 namespace DB
 {
+
+struct TemporaryFileStream;
+
+class Volume;
+using VolumePtr = std::shared_ptr<Volume>;
 
 namespace ErrorCodes
 {
@@ -33,7 +36,7 @@ class MergeSortingBlocksBlockInputStream : public IBlockInputStream
 {
 public:
     /// limit - if not 0, allowed to return just first 'limit' rows in sorted order.
-    MergeSortingBlocksBlockInputStream(Blocks & blocks_, SortDescription & description_,
+    MergeSortingBlocksBlockInputStream(Blocks & blocks_, const SortDescription & description_,
         size_t max_merged_block_size_, UInt64 limit_ = 0);
 
     String getName() const override { return "MergeSortingBlocks"; }
@@ -54,19 +57,19 @@ private:
     UInt64 limit;
     size_t total_merged_rows = 0;
 
-    using CursorImpls = std::vector<SortCursorImpl>;
-    CursorImpls cursors;
+    SortCursorImpls cursors;
 
     bool has_collation = false;
 
-    std::priority_queue<SortCursor> queue_without_collation;
-    std::priority_queue<SortCursorWithCollation> queue_with_collation;
+    SortingHeap<SortCursor> queue_without_collation;
+    SortingHeap<SimpleSortCursor> queue_simple;
+    SortingHeap<SortCursorWithCollation> queue_with_collation;
 
     /** Two different cursors are supported - with and without Collation.
      *  Templates are used (instead of virtual functions in SortCursor) for zero-overhead.
      */
-    template <typename TSortCursor>
-    Block mergeImpl(std::priority_queue<TSortCursor> & queue);
+    template <typename TSortingHeap>
+    Block mergeImpl(TSortingHeap & queue);
 };
 
 
@@ -77,7 +80,7 @@ public:
     MergeSortingBlockInputStream(const BlockInputStreamPtr & input, SortDescription & description_,
         size_t max_merged_block_size_, UInt64 limit_,
         size_t max_bytes_before_remerge_,
-        size_t max_bytes_before_external_sort_, const std::string & tmp_path_,
+        size_t max_bytes_before_external_sort_, VolumePtr tmp_volume_,
         size_t min_free_disk_space_);
 
     String getName() const override { return "MergeSorting"; }
@@ -97,7 +100,7 @@ private:
 
     size_t max_bytes_before_remerge;
     size_t max_bytes_before_external_sort;
-    const std::string tmp_path;
+    VolumePtr tmp_volume;
     size_t min_free_disk_space;
 
     Logger * log = &Logger::get("MergeSortingBlockInputStream");
@@ -114,19 +117,7 @@ private:
     Block header_without_constants;
 
     /// Everything below is for external sorting.
-    std::vector<std::unique_ptr<Poco::TemporaryFile>> temporary_files;
-
-    /// For reading data from temporary file.
-    struct TemporaryFileStream
-    {
-        ReadBufferFromFile file_in;
-        CompressedReadBuffer compressed_in;
-        BlockInputStreamPtr block_in;
-
-        TemporaryFileStream(const std::string & path, const Block & header_)
-            : file_in(path), compressed_in(file_in), block_in(std::make_shared<NativeBlockInputStream>(compressed_in, header_, 0)) {}
-    };
-
+    std::vector<std::unique_ptr<TemporaryFile>> temporary_files;
     std::vector<std::unique_ptr<TemporaryFileStream>> temporary_inputs;
 
     BlockInputStreams inputs_to_merge;

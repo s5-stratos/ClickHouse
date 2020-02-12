@@ -40,7 +40,7 @@ protected:
     UInt64 redirects { 0 };
     Poco::URI initial_uri;
     const ConnectionTimeouts & timeouts;
-    DB::SettingUInt64 max_redirects;
+    SettingUInt64 max_redirects;
 
 public:
     virtual void buildNewSession(const Poco::URI & uri) = 0;
@@ -86,6 +86,10 @@ namespace detail
     template <typename UpdatableSessionPtr>
     class ReadWriteBufferFromHTTPBase : public ReadBuffer
     {
+    public:
+        using HTTPHeaderEntry = std::tuple<std::string, std::string>;
+        using HTTPHeaderEntries = std::vector<HTTPHeaderEntry>;
+
     protected:
         Poco::URI uri;
         std::string method;
@@ -96,6 +100,8 @@ namespace detail
         std::function<void(std::ostream &)> out_stream_callback;
         const Poco::Net::HTTPBasicCredentials & credentials;
         std::vector<Poco::Net::HTTPCookie> cookies;
+        HTTPHeaderEntries http_header_entries;
+        RemoteHostFilter remote_host_filter;
 
         std::istream * call(const Poco::URI uri_, Poco::Net::HTTPResponse & response)
         {
@@ -108,6 +114,11 @@ namespace detail
 
             if (out_stream_callback)
                 request.setChunkedTransferEncoding(true);
+
+            for (auto & http_header_entry: http_header_entries)
+            {
+                request.set(std::get<0>(http_header_entry), std::get<1>(http_header_entry));
+            }
 
             if (!credentials.getUsername().empty())
                 credentials.authenticate(request);
@@ -146,13 +157,17 @@ namespace detail
             const std::string & method_ = {},
             OutStreamCallback out_stream_callback_ = {},
             const Poco::Net::HTTPBasicCredentials & credentials_ = {},
-            size_t buffer_size_ = DBMS_DEFAULT_BUFFER_SIZE)
+            size_t buffer_size_ = DBMS_DEFAULT_BUFFER_SIZE,
+            HTTPHeaderEntries http_header_entries_ = {},
+            const RemoteHostFilter & remote_host_filter_ = {})
             : ReadBuffer(nullptr, 0)
             , uri {uri_}
             , method {!method_.empty() ? method_ : out_stream_callback_ ? Poco::Net::HTTPRequest::HTTP_POST : Poco::Net::HTTPRequest::HTTP_GET}
             , session {session_}
             , out_stream_callback {out_stream_callback_}
             , credentials {credentials_}
+            , http_header_entries {http_header_entries_}
+            , remote_host_filter {remote_host_filter_}
         {
             Poco::Net::HTTPResponse response;
 
@@ -161,6 +176,7 @@ namespace detail
             while (isRedirect(response.getStatus()))
             {
                 Poco::URI uri_redirect(response.get("Location"));
+                remote_host_filter.checkURL(uri_redirect);
 
                 session->updateSession(uri_redirect);
 
@@ -228,10 +244,12 @@ public:
         const std::string & method_ = {},
         OutStreamCallback out_stream_callback_ = {},
         const ConnectionTimeouts & timeouts = {},
-        const DB::SettingUInt64 max_redirects = 0,
+        const SettingUInt64 max_redirects = 0,
         const Poco::Net::HTTPBasicCredentials & credentials_ = {},
-        size_t buffer_size_ = DBMS_DEFAULT_BUFFER_SIZE)
-        : Parent(std::make_shared<UpdatableSession>(uri_, timeouts, max_redirects), uri_, method_, out_stream_callback_, credentials_, buffer_size_)
+        size_t buffer_size_ = DBMS_DEFAULT_BUFFER_SIZE,
+        const HTTPHeaderEntries & http_header_entries_ = {},
+        const RemoteHostFilter & remote_host_filter_ = {})
+        : Parent(std::make_shared<UpdatableSession>(uri_, timeouts, max_redirects), uri_, method_, out_stream_callback_, credentials_, buffer_size_, http_header_entries_, remote_host_filter_)
     {
     }
 };
@@ -271,7 +289,7 @@ public:
         const ConnectionTimeouts & timeouts_ = {},
         const Poco::Net::HTTPBasicCredentials & credentials_ = {},
         size_t buffer_size_ = DBMS_DEFAULT_BUFFER_SIZE,
-        const DB::SettingUInt64 max_redirects = 0,
+        const SettingUInt64 max_redirects = 0,
         size_t max_connections_per_endpoint = DEFAULT_COUNT_OF_HTTP_CONNECTIONS_PER_ENDPOINT)
         : Parent(std::make_shared<UpdatablePooledSession>(uri_, timeouts_, max_redirects, max_connections_per_endpoint),
               uri_,

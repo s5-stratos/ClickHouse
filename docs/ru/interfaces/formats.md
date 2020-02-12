@@ -14,6 +14,7 @@ ClickHouse может принимать (`INSERT`) и отдавать (`SELECT
 | [TemplateIgnoreSpaces](#templateignorespaces) | ✔ | ✗ |
 | [CSV](#csv) | ✔ | ✔ |
 | [CSVWithNames](#csvwithnames) | ✔ | ✔ |
+| [CustomSeparated](#format-customseparated) | ✔ | ✔ |
 | [Values](#data-format-values) | ✔ | ✔ |
 | [Vertical](#vertical) | ✗ | ✔ |
 | [JSON](#json) | ✗ | ✔ |
@@ -27,6 +28,7 @@ ClickHouse может принимать (`INSERT`) и отдавать (`SELECT
 | [PrettySpace](#prettyspace) | ✗ | ✔ |
 | [Protobuf](#protobuf) | ✔ | ✔ |
 | [Parquet](#data-format-parquet) | ✔ | ✔ |
+| [ORC](#data-format-orc) | ✔ | ✗ |
 | [RowBinary](#rowbinary) | ✔ | ✔ |
 | [RowBinaryWithNamesAndTypes](#rowbinarywithnamesandtypes) | ✔ | ✔ |
 | [Native](#native) | ✔ | ✔ |
@@ -99,6 +101,32 @@ world
 
 [NULL](../query_language/syntax.md) форматируется как `\N`.
 
+Каждый элемент структуры типа [Nested](../data_types/nested_data_structures/nested.md) представляется как отдельный массив.
+
+Например:
+
+```sql
+CREATE TABLE nestedt
+(
+    `id` UInt8, 
+    `aux` Nested(
+        a UInt8, 
+        b String
+    )
+)
+ENGINE = TinyLog
+```
+```sql
+INSERT INTO nestedt Values ( 1, [1], ['a'])
+```
+```sql
+SELECT * FROM nestedt FORMAT TSV
+```
+```text
+1	[1]	['a']
+```
+
+
 ## TabSeparatedRaw {#tabseparatedraw}
 
 Отличается от формата `TabSeparated` тем, что строки выводятся без экранирования.
@@ -125,56 +153,59 @@ world
 
 Этот формат позволяет указать произвольную форматную строку, в которую подставляются значения, сериализованные выбранным способом.
 
-Для этого используются настройки `format_schema`, `format_schema_rows`, `format_schema_rows_between_delimiter` и настройки экранирования других форматов (например, `output_format_json_quote_64bit_integers` при экранировании как в `JSON`, см. далее)
+Для этого используются настройки `format_template_resultset`, `format_template_row`, `format_template_rows_between_delimiter` и настройки экранирования других форматов (например, `output_format_json_quote_64bit_integers` при экранировании как в `JSON`, см. далее)
 
-Форматная строка `format_schema_rows` задаёт формат для строк таблицы и должна иметь вид:
+Настройка `format_template_row` задаёт путь к файлу, содержащему форматную строку для строк таблицы, которая должна иметь вид:
 
  `delimiter_1${column_1:serializeAs_1}delimiter_2${column_2:serializeAs_2} ... delimiter_N`,
 
-  где `delimiter_i` - разделители между значениями (символ `$` в разделителе экранируется как `$$`), 
-  `column_i` - имена столбцов, значения которых должны быть выведены или считаны (если имя не указано - столбец пропускается), 
+  где `delimiter_i` - разделители между значениями (символ `$` в разделителе экранируется как `$$`),
+  `column_i` - имена или номера столбцов, значения которых должны быть выведены или считаны (если имя не указано - столбец пропускается),
   `serializeAs_i` - тип экранирования для значений соответствующего столбца. Поддерживаются следующие типы экранирования:
-  
+
   - `CSV`, `JSON`, `XML` (как в одноимённых форматах)
   - `Escaped` (как в `TSV`)
   - `Quoted` (как в `Values`)
   - `Raw` (без экранирования, как в `TSVRaw`)
   - `None` (тип экранирования отсутствует, см. далее)
-  
-  Если для столбца не указан тип экранирования, используется `None`. `XML` и `Raw` поддерживаются только для вывода. 
-  
-  Так, в форматной строке 
-  
+
+  Если для столбца не указан тип экранирования, используется `None`. `XML` и `Raw` поддерживаются только для вывода.
+
+  Так, в форматной строке
+
   `Search phrase: ${SearchPhrase:Quoted}, count: ${c:Escaped}, ad price: $$${price:JSON};`
-  
+
   между разделителями `Search phrase: `, `, count: `, `, ad price: $` и `;` при выводе будут подставлены (при вводе - будут ожидаться) значения столбцов `SearchPhrase`, `c` и `price`, сериализованные как `Quoted`, `Escaped` и `JSON` соответственно, например:
 
   `Search phrase: 'bathroom interior design', count: 2166, ad price: $3;`
-  
- Настройка `format_schema_rows_between_delimiter` задаёт разделитель между строками, который выводится (или ожмдается при вводе) после каждой строки, кроме последней. По умолчанию `\n`.
-  
-Форматная строка `format_schema` имеет аналогичный `format_schema_rows` синтаксис и позволяет указать префикс, суффикс и способ вывода дополнительной информации. Вместо имён столбцов в ней указываются следующие имена подстановок:
 
- - `data` - строки с данными в формате `format_schema_rows`, разделённые `format_schema_rows_between_delimiter`. Эта подстановка должна быть первой подстановкой в форматной строке.
- - `totals` - строка с тотальными значениями в формате `format_schema_rows` (при использовании WITH TOTALS)
- - `min` - строка с минимальными значениями в формате `format_schema_rows` (при настройке extremes, выставленной в 1)
- - `max` - строка с максимальными значениями в формате `format_schema_rows` (при настройке extremes, выставленной в 1)
+ Настройка `format_template_rows_between_delimiter` задаёт разделитель между строками, который выводится (или ожмдается при вводе) после каждой строки, кроме последней. По умолчанию `\n`.
+
+Настройка `format_template_resultset` задаёт путь к файлу, содержащему форматную строку для результата. Форматная строка для результата имеет синтаксис аналогичный форматной строке для строк таблицы и позволяет указать префикс, суффикс и способ вывода дополнительной информации. Вместо имён столбцов в ней указываются следующие имена подстановок:
+
+ - `data` - строки с данными в формате `format_template_row`, разделённые `format_template_rows_between_delimiter`. Эта подстановка должна быть первой подстановкой в форматной строке.
+ - `totals` - строка с тотальными значениями в формате `format_template_row` (при использовании WITH TOTALS)
+ - `min` - строка с минимальными значениями в формате `format_template_row` (при настройке extremes, выставленной в 1)
+ - `max` - строка с максимальными значениями в формате `format_template_row` (при настройке extremes, выставленной в 1)
  - `rows` - общее количество выведенных стрчек
  - `rows_before_limit` - не менее скольких строчек получилось бы, если бы не было LIMIT-а. Выводится только если запрос содержит LIMIT. В случае, если запрос содержит GROUP BY, `rows_before_limit` - точное число строк, которое получилось бы, если бы не было LIMIT-а.
  - `time` - время выполнения запроса в секундах
  - `rows_read` - сколько строк было прочитано при выполнении запроса
  - `bytes_read` - сколько байт (несжатых) было прочитано при выполнении запроса
- 
+
  У подстановок `data`, `totals`, `min` и `max` не должны быть указаны типы экранирования (или должен быть указан `None`). Остальные подстановки - это отдельные значения, для них может быть указан любой тип экранирования.
- Если строка `format_schema` пустая, то по-умолчанию используется `${data}`.
- Из всех перечисленных подстановок форматная строка `format_schema` для ввода может содержать только `data`.
+ Если строка `format_template_resultset` пустая, то по-умолчанию используется `${data}`.
+ Из всех перечисленных подстановок форматная строка `format_template_resultset` для ввода может содержать только `data`.
  Также при вводе формат поддерживает пропуск значений столбцов и пропуск значений в префиксе и суффиксе (см. пример).
- 
+
  Пример вывода:
 ```sql
-SELECT SearchPhrase, count() AS c FROM test.hits GROUP BY SearchPhrase ORDER BY c DESC LIMIT 5
-FORMAT Template 
-SETTINGS format_schema = '<!DOCTYPE HTML>
+SELECT SearchPhrase, count() AS c FROM test.hits GROUP BY SearchPhrase ORDER BY c DESC LIMIT 5 FORMAT Template SETTINGS
+format_template_resultset = '/some/path/resultset.format', format_template_row = '/some/path/row.format', format_template_rows_between_delimiter = '\n    '
+```
+`/some/path/resultset.format`:
+```
+<!DOCTYPE HTML>
 <html> <head> <title>Search phrases</title> </head>
  <body>
   <table border="1"> <caption>Search phrases</caption>
@@ -186,10 +217,13 @@ SETTINGS format_schema = '<!DOCTYPE HTML>
   </table>
   <b>Processed ${rows_read:XML} rows in ${time:XML} sec</b>
  </body>
-</html>',
-format_schema_rows = '<tr> <td>${SearchPhrase:XML}</td> <td>${с:XML}</td> </tr>',
-format_schema_rows_between_delimiter = '\n    '
+</html>
 ```
+`/some/path/row.format`:
+```
+<tr> <td>${0:XML}</td> <td>${1:XML}</td> </tr>
+```
+Резутьтат:
 ```html
 <!DOCTYPE HTML>
 <html> <head> <title>Search phrases</title> </head>
@@ -218,13 +252,20 @@ Page views: 6, User id: 4324182021466249494, Useless field: world, Duration: 185
 Total rows: 2
 ```
 ```sql
-INSERT INTO UserActivity FORMAT Template SETTINGS 
-format_schema = 'Some header\n${data}\nTotal rows: ${:CSV}\n', 
-format_schema_rows = 'Page views: ${PageViews:CSV}, User id: ${UserID:CSV}, Useless field: ${:CSV}, Duration: ${Duration:CSV}, Sign: ${Sign:CSV}'
+INSERT INTO UserActivity FORMAT Template SETTINGS
+format_template_resultset = '/some/path/resultset.format', format_template_row = '/some/path/row.format'
+```
+`/some/path/resultset.format`:
+```
+Some header\n${data}\nTotal rows: ${:CSV}\n
+```
+`/some/path/row.format`:
+```
+Page views: ${PageViews:CSV}, User id: ${UserID:CSV}, Useless field: ${:CSV}, Duration: ${Duration:CSV}, Sign: ${Sign:CSV}
 ```
 `PageViews`, `UserID`, `Duration` и `Sign` внутри подстановок - имена столбцов в таблице, в которую вставляются данные. Значения после `Useless field` в строках и значение после `\nTotal rows: ` в суффиксе будут проигнорированы.
 Все разделители во входных данных должны строго соответствовать разделителям в форматных строках.
- 
+
 ## TemplateIgnoreSpaces {#templateignorespaces}
 
 Подходит только для ввода. Отличается от формата `Template` тем, что пропускает пробельные символы между разделителями и значениями во входном потоке. Также в этом формате можно указать пустые подстановки с типом экранирования `None` (`${}` или `${:None}`), чтобы разбить разделители на несколько частей, пробелы между которыми должны игнорироваться. Такие подстановки используются только для пропуска пробелов. С помощью этого формата можно считывать `JSON`, если значения столбцов в нём всегда идут в одном порядке в каждой строке. Например, для вставки данных из примера вывода формата [JSON](#json) в таблицу со столбцами `phrase` и `cnt` можно использовать следующий запрос:
@@ -291,6 +332,11 @@ $ clickhouse-client --format_csv_delimiter="|" --query="INSERT INTO test.csv FOR
 ## CSVWithNames
 
 Выводит также заголовок, аналогично `TabSeparatedWithNames`.
+
+## CustomSeparated {#format-customseparated}
+
+Аналогичен [Template](#format-template), но выводит (или считывает) все столбцы, используя для них правило экранирования из настройки `format_custom_escaping_rule` и разделители из настроек `format_custom_field_delimiter`, `format_custom_row_before_delimiter`, `format_custom_row_after_delimiter`, `format_custom_row_between_delimiter`, `format_custom_result_before_delimiter` и `format_custom_result_after_delimiter`, а не из форматных строк.
+Также существует формат `CustomSeparatedIgnoreSpaces`, аналогичный `TemplateIgnoreSpaces`.
 
 ## JSON {#json}
 
@@ -920,9 +966,9 @@ ClickHouse поддерживает настраиваемую точность 
 
 Неподдержанные типы данных Parquet: `DATE32`, `TIME32`, `FIXED_SIZE_BINARY`, `JSON`, `UUID`, `ENUM`.
 
-Типы данных столбцов в ClickHouse могут отличаться от типов данных соответствущих полей файла в формате Parquet. При вставке данных, ClickHouse интерпретирует типы данных в соответствии с таблицей выше, а затем [приводит](../query_language/functions/type_conversion_functions/#type_conversion_function-cast) данные к тому типу, который установлен для столбца таблицы.
+Типы данных столбцов в ClickHouse могут отличаться от типов данных соответствующих полей файла в формате Parquet. При вставке данных, ClickHouse интерпретирует типы данных в соответствии с таблицей выше, а затем [приводит](../query_language/functions/type_conversion_functions/#type_conversion_function-cast) данные к тому типу, который установлен для столбца таблицы.
 
-### Inserting and Selecting Data
+### Вставка и выборка данных
 
 Чтобы вставить в ClickHouse данные из файла в формате Parquet, выполните команду следующего вида:
 
@@ -936,7 +982,49 @@ $ cat {filename} | clickhouse-client --query="INSERT INTO {some_table} FORMAT Pa
 $ clickhouse-client --query="SELECT * FROM {some_table} FORMAT Parquet" > {some_file.pq}
 ```
 
-Для обмена данными с экосистемой Hadoop можно использовать движки таблиц [HDFS](../operations/table_engines/hdfs.md) и `URL`.
+Для обмена данными с экосистемой Hadoop можно использовать движки таблиц [HDFS](../operations/table_engines/hdfs.md).
+
+
+## ORC {#data-format-orc}
+
+[Apache ORC](https://orc.apache.org/) - это column-oriented формат данных, распространённый в экосистеме Hadoop. Вы можете только вставлять данные этого формата в ClickHouse.
+
+### Соответствие типов данных
+
+Таблица показывает поддержанные типы данных и их соответствие [типам данных](../data_types/index.md) ClickHouse для запросов `INSERT`.
+
+| Тип данных ORC (`INSERT`) | Тип данных ClickHouse |
+| -------------------- | ------------------ |
+| `UINT8`, `BOOL` | [UInt8](../data_types/int_uint.md) |
+| `INT8` | [Int8](../data_types/int_uint.md) |
+| `UINT16` | [UInt16](../data_types/int_uint.md) |
+| `INT16` | [Int16](../data_types/int_uint.md) |
+| `UINT32` | [UInt32](../data_types/int_uint.md) |
+| `INT32` | [Int32](../data_types/int_uint.md) |
+| `UINT64` | [UInt64](../data_types/int_uint.md) |
+| `INT64` | [Int64](../data_types/int_uint.md) |
+| `FLOAT`, `HALF_FLOAT` | [Float32](../data_types/float.md) |
+| `DOUBLE` | [Float64](../data_types/float.md) |
+| `DATE32` | [Date](../data_types/date.md) |
+| `DATE64`, `TIMESTAMP` | [DateTime](../data_types/datetime.md) |
+| `STRING`, `BINARY` | [String](../data_types/string.md) |
+| `DECIMAL` | [Decimal](../data_types/decimal.md) |
+
+ClickHouse поддерживает настраиваемую точность для формата `Decimal`. При обработке запроса `INSERT`, ClickHouse обрабатывает тип данных Parquet `DECIMAL` как `Decimal128`.
+
+Неподдержанные типы данных ORC: `DATE32`, `TIME32`, `FIXED_SIZE_BINARY`, `JSON`, `UUID`, `ENUM`.
+
+Типы данных столбцов в таблицах ClickHouse могут отличаться от типов данных для соответствующих полей ORC. При вставке данных, ClickHouse интерпретирует типы данных ORC согласно таблице соответствия, а затем [приводит](../query_language/functions/type_conversion_functions/#type_conversion_function-cast) данные к типу, установленному для столбца таблицы ClickHouse.
+
+### Вставка данных
+
+Данные ORC можно вставить в таблицу ClickHouse командой:
+
+```bash
+$ cat filename.orc | clickhouse-client --query="INSERT INTO some_table FORMAT ORC"
+```
+
+Для обмена данных с Hadoop можно использовать [движок таблиц HDFS](../operations/table_engines/hdfs.md).
 
 ## Схема формата {#formatschema}
 
@@ -951,4 +1039,4 @@ $ clickhouse-client --query="SELECT * FROM {some_table} FORMAT Parquet" > {some_
 Если для ввода/вывода данных используется [HTTP-интерфейс](../interfaces/http.md), то файл со схемой должен располагаться на сервере в каталоге,
 указанном в параметре [format_schema_path](../operations/server_settings/settings.md#server_settings-format_schema_path) конфигурации сервера.
 
-[Оригинальная статья](https://clickhouse.yandex/docs/ru/interfaces/formats/) <!--hide-->
+[Оригинальная статья](https://clickhouse.tech/docs/ru/interfaces/formats/) <!--hide-->

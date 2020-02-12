@@ -15,6 +15,7 @@ The supported formats are:
 | [TemplateIgnoreSpaces](#templateignorespaces) | ✔ | ✗ |
 | [CSV](#csv) | ✔ | ✔ |
 | [CSVWithNames](#csvwithnames) | ✔ | ✔ |
+| [CustomSeparated](#format-customseparated) | ✔ | ✔ |
 | [Values](#data-format-values) | ✔ | ✔ |
 | [Vertical](#vertical) | ✗ | ✔ |
 | [JSON](#json) | ✗ | ✔ |
@@ -27,7 +28,9 @@ The supported formats are:
 | [PrettyNoEscapes](#prettynoescapes) | ✗ | ✔ |
 | [PrettySpace](#prettyspace) | ✗ | ✔ |
 | [Protobuf](#protobuf) | ✔ | ✔ |
+| [Avro](#data-format-avro) | ✔ | ✔ |
 | [Parquet](#data-format-parquet) | ✔ | ✔ |
+| [ORC](#data-format-orc) | ✔ | ✗ |
 | [RowBinary](#rowbinary) | ✔ | ✔ |
 | [RowBinaryWithNamesAndTypes](#rowbinarywithnamesandtypes) | ✔ | ✔ |
 | [Native](#native) | ✔ | ✔ |
@@ -96,9 +99,34 @@ The minimum set of characters that you need to escape when passing data in TabSe
 
 Only a small set of symbols are escaped. You can easily stumble onto a string value that your terminal will ruin in output.
 
-Arrays are written as a list of comma-separated values in square brackets. Number items in the array are fomratted as normally, but dates, dates with times, and strings are written in single quotes with the same escaping rules as above.
+Arrays are written as a list of comma-separated values in square brackets. Number items in the array are formatted as normally. `Date` and `DateTime` types are written in single quotes. Strings are written in single quotes with the same escaping rules as above.
 
 [NULL](../query_language/syntax.md) is formatted as `\N`.
+
+Each element of [Nested](../data_types/nested_data_structures/nested.md) structures is represented as array.
+
+For example:
+
+```sql
+CREATE TABLE nestedt
+(
+    `id` UInt8, 
+    `aux` Nested(
+        a UInt8, 
+        b String
+    )
+)
+ENGINE = TinyLog
+```
+```sql
+INSERT INTO nestedt Values ( 1, [1], ['a'])
+```
+```sql
+SELECT * FROM nestedt FORMAT TSV
+```
+```text
+1	[1]	['a']
+```
 
 ## TabSeparatedRaw {#tabseparatedraw}
 
@@ -126,14 +154,14 @@ This format is also available under the name `TSVWithNamesAndTypes`.
 
 This format allows to specify a custom format string with placeholders for values with specified escaping rule.
 
-It uses settings `format_schema`, `format_schema_rows`, `format_schema_rows_between_delimiter` and some settings of other formats (e.g. `output_format_json_quote_64bit_integers` when using `JSON` escaping, see further)
+It uses settings `format_template_resultset`, `format_template_row`, `format_template_rows_between_delimiter` and some settings of other formats (e.g. `output_format_json_quote_64bit_integers` when using `JSON` escaping, see further)
 
-Format string `format_schema_rows` specifies rows format with the following syntax:
+Setting `format_template_row` specifies path to file, which contains format string for rows with the following syntax:
 
  `delimiter_1${column_1:serializeAs_1}delimiter_2${column_2:serializeAs_2} ... delimiter_N`,
 
   where `delimiter_i` is a delimiter between values (`$` symbol can be escaped as `$$`), 
-  `column_i` is a name of a column whose values are to be selected or inserted (if empty, then column will be skipped), 
+  `column_i` is a name or index of a column whose values are to be selected or inserted (if empty, then column will be skipped), 
   `serializeAs_i` is an escaping rule for the column values. The following escaping rules are supported:
   
   - `CSV`, `JSON`, `XML` (similarly to the formats of the same names)
@@ -152,14 +180,14 @@ Format string `format_schema_rows` specifies rows format with the following synt
 
   `Search phrase: 'bathroom interior design', count: 2166, ad price: $3;`
   
- The `format_schema_rows_between_delimiter` setting specifies delimiter between rows, which is printed (or expected) after every row except the last one (`\n` by default)
+ The `format_template_rows_between_delimiter` setting specifies delimiter between rows, which is printed (or expected) after every row except the last one (`\n` by default)
 
-Format string `format_schema` has the same syntax as `format_schema_rows` and allows to specify a prefix, a suffix and a way to print some additional information. It contains the following placeholders instead of column names:
+Setting `format_template_resultset` specifies path to file, which contains format string for resultset. Format string for resultset has the same syntax as format string for row and allows to specify a prefix, a suffix and a way to print some additional information. It contains the following placeholders instead of column names:
 
- - `data` is the rows with data in `format_schema_rows` format, separated by `format_schema_rows_between_delimiter`. This placeholder must be the first placeholder in the format string.
- - `totals` is the row with total values in `format_schema_rows` format (when using WITH TOTALS)
- - `min` is the row with minimum values in `format_schema_rows` format (when extremes is set to 1)
- - `max` is the row with maximum values in `format_schema_rows` format (when extremes is set to 1)
+ - `data` is the rows with data in `format_template_row` format, separated by `format_template_rows_between_delimiter`. This placeholder must be the first placeholder in the format string.
+ - `totals` is the row with total values in `format_template_row` format (when using WITH TOTALS)
+ - `min` is the row with minimum values in `format_template_row` format (when extremes is set to 1)
+ - `max` is the row with maximum values in `format_template_row` format (when extremes is set to 1)
  - `rows` is the total number of output rows
  - `rows_before_limit` is the minimal number of rows there would have been without LIMIT. Output only if the query contains LIMIT. If the query contains GROUP BY, rows_before_limit_at_least is the exact number of rows there would have been without a LIMIT.
  - `time` is the request execution time in seconds
@@ -167,14 +195,17 @@ Format string `format_schema` has the same syntax as `format_schema_rows` and al
  - `bytes_read` is the number of bytes (uncompressed) have been read
  
  The placeholders `data`, `totals`, `min` and `max` must not have escaping rule specified (or `None` must be specified explicitly). The remaining placeholders may have any escaping rule specified.
- If the `format_schema` setting is an empty string, `${data}` is used as default value.
+ If the `format_template_resultset` setting is an empty string, `${data}` is used as default value.
   For insert queries format allows to skip some columns or some fields if prefix or suffix (see example).
  
- `Select` example:
+ Select example:
 ```sql
-SELECT SearchPhrase, count() AS c FROM test.hits GROUP BY SearchPhrase ORDER BY c DESC LIMIT 5
-FORMAT Template 
-SETTINGS format_schema = '<!DOCTYPE HTML>
+SELECT SearchPhrase, count() AS c FROM test.hits GROUP BY SearchPhrase ORDER BY c DESC LIMIT 5 FORMAT Template SETTINGS 
+format_template_resultset = '/some/path/resultset.format', format_template_row = '/some/path/row.format', format_template_rows_between_delimiter = '\n    '
+```
+`/some/path/resultset.format`:
+```text
+<!DOCTYPE HTML>
 <html> <head> <title>Search phrases</title> </head>
  <body>
   <table border="1"> <caption>Search phrases</caption>
@@ -186,10 +217,13 @@ SETTINGS format_schema = '<!DOCTYPE HTML>
   </table>
   <b>Processed ${rows_read:XML} rows in ${time:XML} sec</b>
  </body>
-</html>',
-format_schema_rows = '<tr> <td>${SearchPhrase:XML}</td> <td>${с:XML}</td> </tr>',
-format_schema_rows_between_delimiter = '\n    '
+</html>
 ```
+`/some/path/row.format`:
+```text
+<tr> <td>${0:XML}</td> <td>${1:XML}</td> </tr>
+```
+Result:
 ```html
 <!DOCTYPE HTML>
 <html> <head> <title>Search phrases</title> </head>
@@ -210,7 +244,7 @@ format_schema_rows_between_delimiter = '\n    '
 </html>
 ```
 
-`Insert` example:
+Insert example:
 ```text
 Some header
 Page views: 5, User id: 4324182021466249494, Useless field: hello, Duration: 146, Sign: -1
@@ -219,8 +253,15 @@ Total rows: 2
 ```
 ```sql
 INSERT INTO UserActivity FORMAT Template SETTINGS 
-format_schema = 'Some header\n${data}\nTotal rows: ${:CSV}\n', 
-format_schema_rows = 'Page views: ${PageViews:CSV}, User id: ${UserID:CSV}, Useless field: ${:CSV}, Duration: ${Duration:CSV}, Sign: ${Sign:CSV}'
+format_template_resultset = '/some/path/resultset.format', format_template_row = '/some/path/row.format'
+```
+`/some/path/resultset.format`:
+```text
+Some header\n${data}\nTotal rows: ${:CSV}\n
+```
+`/some/path/row.format`:
+```text
+Page views: ${PageViews:CSV}, User id: ${UserID:CSV}, Useless field: ${:CSV}, Duration: ${Duration:CSV}, Sign: ${Sign:CSV}
 ```
 `PageViews`, `UserID`, `Duration` and `Sign` inside placeholders are names of columns in the table. Values after `Useless field` in rows and after `\nTotal rows: ` in suffix will be ignored.
 All delimiters in the input data must be strictly equal to delimiters in specified format strings.
@@ -232,9 +273,15 @@ Similar to `Template`,  but skips whitespace characters between delimiters and v
 It's possible to read `JSON` using this format, if values of columns have the same order in all rows. For example, the following request can be used for inserting data from output example of format [JSON](#json):
 ```sql
 INSERT INTO table_name FORMAT TemplateIgnoreSpaces SETTINGS
-format_schema = '{${}"meta"${}:${:JSON},${}"data"${}:${}[${data}]${},${}"totals"${}:${:JSON},${}"extremes"${}:${:JSON},${}"rows"${}:${:JSON},${}"rows_before_limit_at_least"${}:${:JSON}${}}',
-format_schema_rows = '{${}"SearchPhrase"${}:${}${phrase:JSON}${},${}"c"${}:${}${cnt:JSON}${}}',
-format_schema_rows_between_delimiter = ','
+format_template_resultset = '/some/path/resultset.format', format_template_row = '/some/path/row.format', format_template_rows_between_delimiter = ','
+```
+`/some/path/resultset.format`:
+```text
+{${}"meta"${}:${:JSON},${}"data"${}:${}[${data}]${},${}"totals"${}:${:JSON},${}"extremes"${}:${:JSON},${}"rows"${}:${:JSON},${}"rows_before_limit_at_least"${}:${:JSON}${}}
+```
+`/some/path/row.format`:
+```text
+{${}"SearchPhrase"${}:${}${phrase:JSON}${},${}"c"${}:${}${cnt:JSON}${}}
 ```
 
 ## TSKV {#tskv}
@@ -295,6 +342,11 @@ The CSV format supports the output of totals and extremes the same way as `TabSe
 ## CSVWithNames
 
 Also prints the header row, similar to `TabSeparatedWithNames`.
+
+## CustomSeparated {#format-customseparated}
+
+Similar to [Template](#format-template), but it prints or reads all columns and uses escaping rule from setting `format_custom_escaping_rule` and delimiters from settings `format_custom_field_delimiter`, `format_custom_row_before_delimiter`, `format_custom_row_after_delimiter`, `format_custom_row_between_delimiter`, `format_custom_result_before_delimiter` and `format_custom_result_after_delimiter`, not from format strings.
+There is also `CustomSeparatedIgnoreSpaces` format, which is similar to `TemplateIgnoreSpaces`.
 
 ## JSON {#json}
 
@@ -694,6 +746,8 @@ The minimum set of characters that you need to escape when passing data in Value
 
 This is the format that is used in `INSERT INTO t VALUES ...`, but you can also use it for formatting query results.
 
+See also: [input_format_values_interpret_expressions](../operations/settings/settings.md#settings-input_format_values_interpret_expressions) and [input_format_values_deduce_templates_of_expressions](../operations/settings/settings.md#settings-input_format_values_deduce_templates_of_expressions) settings.
+
 ## Vertical {#vertical}
 
 Prints each value on a separate line with the column name specified. This format is convenient for printing just one or a few rows, if each row consists of a large number of columns.
@@ -890,6 +944,71 @@ ClickHouse inputs and outputs protobuf messages in the `length-delimited` format
 It means before every message should be written its length as a [varint](https://developers.google.com/protocol-buffers/docs/encoding#varints).
 See also [how to read/write length-delimited protobuf messages in popular languages](https://cwiki.apache.org/confluence/display/GEODE/Delimiting+Protobuf+Messages).
 
+## Avro {#data-format-avro}
+
+[Apache Avro](http://avro.apache.org/) is a row-oriented data serialization framework developed within Apache's Hadoop project.
+
+ClickHouse Avro format supports reading and writing [Avro data files](http://avro.apache.org/docs/current/spec.html#Object+Container+Files).
+
+### Data Types Matching
+
+The table below shows supported data types and how they match ClickHouse [data types](../data_types/index.md) in `INSERT` and `SELECT` queries.
+
+| Avro data type `INSERT` | ClickHouse data type | Avro data type `SELECT` |
+| -------------------- | -------------------- | ------------------ |
+| `boolean`, `int`, `long`, `float`, `double` | [Int(8\|16\|32\)](../data_types/int_uint.md), [UInt(8\|16\|32)](../data_types/int_uint.md) | `int` |
+| `boolean`, `int`, `long`, `float`, `double` | [Int64](../data_types/int_uint.md), [UInt64](../data_types/int_uint.md) | `long` |
+| `boolean`, `int`, `long`, `float`, `double` | [Float32](../data_types/float.md) | `float` |
+| `boolean`, `int`, `long`, `float`, `double` | [Float64](../data_types/float.md) | `double` |
+| `bytes`, `string`, `fixed`, `enum` | [String](../data_types/string.md) | `bytes` |
+| `bytes`, `string`, `fixed` | [FixedString(N)](../data_types/fixedstring.md) | `fixed(N)` |
+| `enum` | [Enum(8\|16)](../data_types/enum.md) | `enum` |
+| `array(T)` | [Array(T)](../data_types/array.md) | `array(T)` |
+| `union(null, T)`, `union(T, null)` | [Nullable(T)](../data_types/date.md) | `union(null, T)`|
+| `null` | [Nullable(Nothing)](../data_types/special_data_types/nothing.md) | `null` |
+| `int (date)` *  | [Date](../data_types/date.md) | `int (date)` * |
+| `long (timestamp-millis)` * | [DateTime64(3)](../data_types/datetime.md) | `long (timestamp-millis)` * |
+| `long (timestamp-micros)` * | [DateTime64(6)](../data_types/datetime.md) | `long (timestamp-micros)` * |
+
+\* [Avro logical types](http://avro.apache.org/docs/current/spec.html#Logical+Types)
+
+
+
+Unsupported Avro data types: `record` (non-root), `map`
+
+Unsupported Avro logical data types: `uuid`, `time-millis`, `time-micros`, `duration`
+
+### Inserting Data
+
+To insert data from an Avro file into ClickHouse table:
+
+```bash
+$ cat file.avro | clickhouse-client --query="INSERT INTO {some_table} FORMAT Avro"
+```
+
+The root schema of input Avro file must be of `record` type.
+
+To find the correspondence between table columns and fields of Avro schema ClickHouse compares their names. This comparison is case-sensitive.  
+Unused fields are skipped.
+
+Data types of a ClickHouse table columns can differ from the corresponding fields of the Avro data inserted. When inserting data, ClickHouse interprets data types according to the table above and then [casts](../query_language/functions/type_conversion_functions/#type_conversion_function-cast) the data to corresponding column type.
+
+### Selecting Data
+
+To select data from ClickHouse table into an Avro file:
+
+```bash
+$ clickhouse-client --query="SELECT * FROM {some_table} FORMAT Avro" > file.avro
+```
+
+Column names must:
+
+- start with `[A-Za-z_]`
+- subsequently contain only `[A-Za-z0-9_]`
+
+Output Avro file compression and sync interval can be configured with [output_format_avro_codec](../operations/settings/settings.md#settings-output_format_avro_codec) and [output_format_avro_sync_interval](../operations/settings/settings.md#settings-output_format_avro_sync_interval) respectively.
+
+
 ## Parquet {#data-format-parquet}
 
 [Apache Parquet](http://parquet.apache.org/) is a columnar storage format widespread in the Hadoop ecosystem. ClickHouse supports read and write operations for this format.
@@ -927,16 +1046,57 @@ Data types of a ClickHouse table columns can differ from the corresponding field
 You can insert Parquet data from a file into ClickHouse table by the following command:
 
 ```bash
-cat {filename} | clickhouse-client --query="INSERT INTO {some_table} FORMAT Parquet"
+$ cat {filename} | clickhouse-client --query="INSERT INTO {some_table} FORMAT Parquet"
 ```
 
 You can select data from a ClickHouse table and save them into some file in the Parquet format by the following command:
 
-```sql
-clickhouse-client --query="SELECT * FROM {some_table} FORMAT Parquet" > {some_file.pq}
+```bash
+$ clickhouse-client --query="SELECT * FROM {some_table} FORMAT Parquet" > {some_file.pq}
 ```
 
-To exchange data with the Hadoop, you can use [HDFS table engine](../operations/table_engines/hdfs.md).
+To exchange data with Hadoop, you can use [HDFS table engine](../operations/table_engines/hdfs.md).
+
+## ORC {#data-format-orc}
+
+[Apache ORC](https://orc.apache.org/) is a columnar storage format widespread in the Hadoop ecosystem. You can only insert data in this format to ClickHouse.
+
+### Data Types Matching
+
+The table below shows supported data types and how they match ClickHouse [data types](../data_types/index.md) in `INSERT` queries.
+
+| ORC data type (`INSERT`) | ClickHouse data type |
+| -------------------- | ------------------ |
+| `UINT8`, `BOOL` | [UInt8](../data_types/int_uint.md) |
+| `INT8` | [Int8](../data_types/int_uint.md) |
+| `UINT16` | [UInt16](../data_types/int_uint.md) |
+| `INT16` | [Int16](../data_types/int_uint.md) |
+| `UINT32` | [UInt32](../data_types/int_uint.md) |
+| `INT32` | [Int32](../data_types/int_uint.md) |
+| `UINT64` | [UInt64](../data_types/int_uint.md) |
+| `INT64` | [Int64](../data_types/int_uint.md) |
+| `FLOAT`, `HALF_FLOAT` | [Float32](../data_types/float.md) |
+| `DOUBLE` | [Float64](../data_types/float.md) |
+| `DATE32` | [Date](../data_types/date.md) |
+| `DATE64`, `TIMESTAMP` | [DateTime](../data_types/datetime.md) |
+| `STRING`, `BINARY` | [String](../data_types/string.md) |
+| `DECIMAL` | [Decimal](../data_types/decimal.md) |
+
+ClickHouse supports configurable precision of the `Decimal` type. The `INSERT` query treats the ORC `DECIMAL` type as the ClickHouse `Decimal128` type.
+
+Unsupported ORC data types: `DATE32`, `TIME32`, `FIXED_SIZE_BINARY`, `JSON`, `UUID`, `ENUM`.
+
+The data types of ClickHouse table columns don't have to match the corresponding ORC data fields. When inserting data, ClickHouse interprets data types according to the table above and then [casts](../query_language/functions/type_conversion_functions/#type_conversion_function-cast) the data to the data type set for the ClickHouse table column.
+
+### Inserting Data
+
+You can insert ORC data from a file into ClickHouse table by the following command:
+
+```bash
+$ cat filename.orc | clickhouse-client --query="INSERT INTO some_table FORMAT ORC"
+```
+
+To exchange data with Hadoop, you can use [HDFS table engine](../operations/table_engines/hdfs.md).
 
 ## Format Schema {#formatschema}
 
@@ -955,4 +1115,12 @@ If you input or output data via the [HTTP interface](../interfaces/http.md) the 
 should be located in the directory specified in [format_schema_path](../operations/server_settings/settings.md#server_settings-format_schema_path)
 in the server configuration.
 
-[Original article](https://clickhouse.yandex/docs/en/interfaces/formats/) <!--hide-->
+[Original article](https://clickhouse.tech/docs/en/interfaces/formats/) <!--hide-->
+
+## Skipping Errors {#skippingerrors}
+
+Some formats such as `CSV`, `TabSeparated`, `TSKV`, `JSONEachRow`, `Template`, `CustomSeparated` and `Protobuf` can skip broken row if parsing error occurred and continue parsing from the beginning of next row. See [input_format_allow_errors_num](../operations/settings/settings.md#settings-input_format_allow_errors_num) and 
+[input_format_allow_errors_ratio](../operations/settings/settings.md#settings-input_format_allow_errors_ratio) settings.
+Limitations:
+ - In case of parsing error `JSONEachRow` skips all data until the new line (or EOF), so rows must be delimited by `\n` to count errors correctly.
+ - `Template` and `CustomSeparated` use delimiter after the last column and delimiter between rows to find the beginning of next row, so skipping errors works only if at least one of them is not empty.

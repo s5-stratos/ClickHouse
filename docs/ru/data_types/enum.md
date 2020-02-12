@@ -2,7 +2,7 @@
 
 Перечисляемый тип данных, содержащий именованные значения.
 
-Именованные значения задаются парами `'string' = integer`. ClickHouse хранить только числа, но допускает операции над ними с помощью заданных имён.
+Именованные значения задаются парами `'string' = integer`. ClickHouse хранит только числа, но допускает операции над ними с помощью заданных имён.
 
 ClickHouse поддерживает:
 
@@ -115,4 +115,4 @@ INSERT INTO t_enum_nullable Values('hello'),('world'),(NULL)
 
 При ALTER, есть возможность поменять Enum8 на Enum16 и обратно - так же, как можно поменять Int8 на Int16.
 
-[Оригинальная статья](https://clickhouse.yandex/docs/ru/data_types/enum/) <!--hide-->
+[Оригинальная статья](https://clickhouse.tech/docs/ru/data_types/enum/) <!--hide-->

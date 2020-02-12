@@ -11,8 +11,6 @@ CREATE TABLE [IF NOT EXISTS] [db.]table_name [ON CLUSTER cluster]
     name1 [type1] [DEFAULT|MATERIALIZED|ALIAS expr1] [TTL expr1],
     name2 [type2] [DEFAULT|MATERIALIZED|ALIAS expr2] [TTL expr2],
     ...
-    INDEX index_name1 expr1 TYPE type1(...) GRANULARITY value1,
-    INDEX index_name2 expr2 TYPE type2(...) GRANULARITY value2
 ) ENGINE = MySQL('host:port', 'database', 'table', 'user', 'password'[, replace_query, 'on_duplicate_clause']);
 ```
 
@@ -90,4 +88,4 @@ SELECT * FROM mysql_table
 - [The 'mysql' table function](../../query_language/table_functions/mysql.md)
 - [Using MySQL as a source of external dictionary](../../query_language/dicts/external_dicts_dict_sources.md#dicts-external_dicts_dict_sources-mysql)
 
-[Original article](https://clickhouse.yandex/docs/en/operations/table_engines/mysql/) <!--hide-->
+[Original article](https://clickhouse.tech/docs/en/operations/table_engines/mysql/) <!--hide-->

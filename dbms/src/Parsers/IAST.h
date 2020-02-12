@@ -5,7 +5,6 @@
 #include <Parsers/IdentifierQuotingStyle.h>
 #include <Common/Exception.h>
 #include <Common/TypePromotion.h>
-#include <IO/WriteHelpers.h>    /// backQuote, backQuoteIfNeed
 
 #include <algorithm>
 #include <ostream>
@@ -147,6 +146,15 @@ public:
         throw Exception("AST subtree not found in children", ErrorCodes::LOGICAL_ERROR);
     }
 
+    template <typename T>
+    void setOrReplace(T * & field, const ASTPtr & child)
+    {
+        if (field)
+            replace(field, child);
+        else
+            set(field, child);
+    }
+
     /// Convert to a string.
 
     /// Format settings.
@@ -222,6 +230,5 @@ public:
 private:
     size_t checkDepthImpl(size_t max_depth, size_t level) const;
 };
-
 
 }
